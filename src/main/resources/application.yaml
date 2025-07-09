@@ -1,0 +1,10 @@
+logging:
+  pattern:
+    console:
+spring:
+  main:
+    banner-mode: OFF
+
+  # GITHUB
+github:
+  token: ${GITHUB_TOKEN_LICHTAUS_AGENT:"something"}

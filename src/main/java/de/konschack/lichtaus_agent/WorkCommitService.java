@@ -11,9 +11,11 @@ import org.springframework.web.client.RestClient;
 
 import java.time.LocalDate;
 import java.time.LocalDateTime;
-import java.time.LocalTime;
 import java.time.format.DateTimeFormatter;
+import java.time.temporal.ChronoUnit;
 import java.util.Arrays;
+import java.util.Comparator;
+import java.util.stream.Collectors;
 
 @Service
 public class WorkCommitService {
@@ -36,40 +38,50 @@ public class WorkCommitService {
      * This includes all types of events, not just commits.
      */
     @Tool(description = "Get all events for a specific user")
-    public CommitEvent[] getAllUserEvents(
+    public CommitEvent[] getAllGithubUserEvents(
             @ToolParam(description = "GitHub user") String user,
-            @ToolParam(description = "Number of days to look back from", required = false) Integer daysOffsetStart,
-            @ToolParam(description = "Number of days to look back until, should be zero if today should be included", required = false) Integer daysOffsetEnd
+            @ToolParam(description = "Number of events to be returned", required = false) Integer offset
     ) {
         CommitEvent[] events = restClient
                 .get()
                 .uri("/users/{username}/events", user).retrieve()
                 .toEntity(CommitEvent[].class).getBody();
+        assert events != null;
+        return Arrays.stream(events).limit(offset).toArray(CommitEvent[]::new);
+    }
 
-        if (daysOffsetStart != null && daysOffsetStart > 0) {
-            LocalDateTime end = daysOffsetEnd!=null? LocalDate.now().minusDays(daysOffsetEnd).atTime(LocalTime.MAX) : LocalDate.now().atTime(LocalTime.MAX);
-            int interval = daysOffsetEnd!=null? daysOffsetStart-daysOffsetEnd : daysOffsetStart;
-            LocalDateTime cutoffDate = end.minusDays(interval);
-            return Arrays.stream(events)
-                    .filter(e -> {
-                        LocalDateTime eventDate = LocalDateTime.parse(e.createdAt(),
-                                DateTimeFormatter.ISO_DATE_TIME);
-                        return eventDate.isAfter(cutoffDate);
-                    })
-                    .toArray(CommitEvent[]::new);
-        }
+    @Tool(description = "Get all events for a specific user for today")
+    public CommitEvent[] getTodaysGithubUserEvents(
+            @ToolParam(description = "GitHub user") String user
+            ) {
+        CommitEvent[] events = restClient
+                .get()
+                .uri("/users/{username}/events", user).retrieve()
+                .toEntity(CommitEvent[].class).getBody();
 
-        return events;
+        assert events != null;
+        return Arrays.stream(events)
+                .filter(e -> {
+                    LocalDateTime eventDateTime = LocalDateTime.parse(e.createdAt(),
+                            DateTimeFormatter.ISO_DATE_TIME);
+                    LocalDateTime todayStart = LocalDate.now().atStartOfDay();
+                    LocalDateTime tomorrowStart = todayStart.plusDays(1);
+                    return eventDateTime.isAfter(todayStart.minusSeconds(1)) &&
+                            eventDateTime.isBefore(tomorrowStart);
+                })
+
+                .sorted(Comparator.comparing(CommitEvent::createdAt).reversed())
+                .toArray(CommitEvent[]::new);
     }
 
     /*
      * Get commits for a specific repository.
      * Use this method when you want to get commits for a specific repository.
      */
-    @Tool(description = "Get commits for a specific repository of which the user is the owner")
+    @Tool(description = "Get commits for a specific repository and owner")
     public CommitInfo[] getRepositoryOwnerCommits(
-            @ToolParam(description = "Name of the GitHub repository") String repo,
-            @ToolParam(description = "Owner of the repository") String owner
+            @ToolParam(description = "Owner of the repository") String owner,
+            @ToolParam(description = "Name of the GitHub repository") String repo
     ) {
         return restClient
                 .get()
@@ -224,4 +236,3 @@ record SearchResult(
 //                .toEntity(SearchResult.class)
 //                .getBody();
 //    }
-

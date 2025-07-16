@@ -1,6 +1,8 @@
 package de.konschack.lichtaus_agent;
 
+import com.fasterxml.jackson.annotation.JsonIgnoreProperties;
 import com.fasterxml.jackson.annotation.JsonProperty;
+import com.fasterxml.jackson.databind.ObjectMapper;
 import de.konschack.lichtaus_agent.config.JiraProperties;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -13,6 +15,7 @@ import java.time.LocalDate;
 import java.time.LocalDateTime;
 import java.time.format.DateTimeFormatter;
 import java.util.Arrays;
+import java.util.stream.Collectors;
 
 @Service
 public class JiraActivityService {
@@ -50,7 +53,7 @@ public class JiraActivityService {
         log.info("Fetching recent Jira activity for user {} in the last {} days", user, days);
 
         // Get issues with worklogs for the user in the specified date range
-        SearchResponse response = restClient
+        String rawResponse = restClient
                 .get()
                 .uri(uriBuilder -> uriBuilder
                         .path("/rest/api/3/search")
@@ -58,11 +61,19 @@ public class JiraActivityService {
                         .queryParam("fields", "summary,worklog,statusCategory,labels,timetracking")
                         .build())
                 .retrieve()
-                .toEntity(SearchResponse.class)
-                .getBody();
+                .body(String.class);
+
+        SearchResponse response;
+        try {
+            ObjectMapper mapper = new ObjectMapper();
+            response = mapper.readValue(rawResponse, SearchResponse.class);
+        } catch (Exception e) {
+            log.error("Error parsing JSON response: ", e);
+            throw new RuntimeException("Failed to parse Jira response", e);
+        }
 
         assert response != null;
-        log.info("response from search api {} {}",response, Arrays.stream(response.issues().clone()).findFirst());
+        log.info("response from search api {} {}",response, Arrays.stream(response.issues().clone()));
 
         // Calculate total time spent
         int totalTimeSpentSeconds = Arrays.stream(response.issues())
@@ -86,7 +97,7 @@ public class JiraActivityService {
         String jqlQuery = String.format("worklogAuthor = '%s' AND updated >= startOfDay() AND updated < endOfDay()",
                 user);
 
-        log.info("Fetching Jira activity for user {} for today {}", user, today);
+        log.info("Fetching Jira activity for user {} for today {} with query {}", user, today, jqlQuery);
 
         // Get issues with worklogs for the user in the specified date range
         SearchResponse response = restClient
@@ -94,7 +105,7 @@ public class JiraActivityService {
                 .uri(uriBuilder -> uriBuilder
                         .path("/rest/api/3/search")
                         .queryParam("jql", jqlQuery)
-                        .queryParam("fields", "summary, worklog, statusCategory, labels, timetracking")
+                        .queryParam("fields", "summary, worklog, statusCategory, labels, subtasks, timetracking")
                         .build())
                 .retrieve()
                 .toEntity(SearchResponse.class)
@@ -117,7 +128,7 @@ public class JiraActivityService {
 }
 
 //summary,worklog,statusCategory,labels,timeestimate,status,timetracking
-// Response models
+@JsonIgnoreProperties(ignoreUnknown = true)
 record UserActivity(
         String user,
         String dateRange,
@@ -125,11 +136,13 @@ record UserActivity(
         int totalTimeSpentSeconds) {
 }
 
+@JsonIgnoreProperties(ignoreUnknown = true)
 record SearchResponse(
         int total,
         Issue[] issues) {
 }
 
+@JsonIgnoreProperties(ignoreUnknown = true)
 record Issue(
         String id,
         String key,
@@ -137,31 +150,71 @@ record Issue(
         Fields fields) {
 }
 
-//summary,worklog,statusCategory,labels,timeestimate,status,timetracking
+@JsonIgnoreProperties(ignoreUnknown = true)
 record Fields(
         String summary,
         TimeTracking timetracking,
         Worklog worklog,
-        StatusCategory statusCategory,
-        String[] labels
-        ) {
+        Status status,
+        String[] labels,
+        Issue[] subtasks) {
+    @Override
+    public String toString() {
+        return "\n****Fields[summary=" + summary +
+                ", timetracking=" + timetracking +
+                ", worklog=" + worklog +
+                ", labels=" + Arrays.toString(labels) +
+                ", subtasks=" + Arrays.toString(subtasks) + "]****\n";
+    }
+
 }
 
-record StatusCategory(
-        String name){
+@JsonIgnoreProperties(ignoreUnknown = true)
+record Status(
+        String name,
+        String description,
+        StatusCategory statusCategory) {
 }
 
+@JsonIgnoreProperties(ignoreUnknown = true)
+record StatusCategory(String name) {
+}
+
+@JsonIgnoreProperties(ignoreUnknown = true)
 record TimeTracking(
         @JsonProperty("originalEstimateSeconds") int originalEstimateSeconds,
         @JsonProperty("remainingEstimateSeconds") int remainingEstimateSeconds,
         @JsonProperty("timeSpentSeconds") int timeSpentSeconds) {
 }
 
+@JsonIgnoreProperties(ignoreUnknown = true)
 record Worklog(
         int total,
         WorklogEntry[] worklogs) {
 }
 
+@JsonIgnoreProperties(ignoreUnknown = true)
+record ContentBlock(
+    String type,
+    String text,
+    Object content  // This could be further structured if needed
+) {}
+
+@JsonIgnoreProperties(ignoreUnknown = true)
+record Comment(
+    ContentBlock[] content,
+    String type
+) {
+    public String getPlainText() {
+        if (content == null) return "";
+        return Arrays.stream(content)
+            .filter(block -> block.text() != null)
+            .map(ContentBlock::text)
+            .collect(Collectors.joining(" "));
+    }
+}
+
+@JsonIgnoreProperties(ignoreUnknown = true)
 record WorklogEntry(
         String id,
         @JsonProperty("self") String url,
@@ -169,14 +222,17 @@ record WorklogEntry(
         @JsonProperty("timeSpentSeconds") int timeSpentSeconds,
         String started,
         String updated,
-        String comment) {
+        Comment comment) {
+    
+    public String getCommentText() {
+        return comment != null ? comment.getPlainText() : "";
+    }
 }
-
+@JsonIgnoreProperties(ignoreUnknown = true)
 record Author(
         @JsonProperty("accountId") String accountId,
         @JsonProperty("emailAddress") String email,
-        @JsonProperty("displayName") String displayName) {
-}
+        @JsonProperty("displayName") String displayName) {}
 //    /**
 //     * Get user activity for a specific date.
 //     * This includes issues created, updated, and commented on by the user.

@@ -4,7 +4,17 @@ logging:
 spring:
   main:
     banner-mode: OFF
+  ai:
+    mcp:
+      server:
+        name: lichtaus-agent
+
 
   # GITHUB
 github:
-  token: ${GITHUB_TOKEN_LICHTAUS_AGENT:"something"}
+  token: ${GITHUB_TOKEN_LICHTAUS_AGENT:something}
+
+# JIRA
+jira:
+  apiKey: ${JIRA_API_KEY_LICHTAUS_AGENT:something}
+  email: ${JIRA_EMAIL_LICHTAUS_AGENT:konschack@sipgate.de}
